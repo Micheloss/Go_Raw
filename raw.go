@@ -4,42 +4,106 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
 )
 
-// type Header_IP4 struct {
-// 	Version  int         // protocol version
-// 	Len      int         // header length
-// 	TOS      int         // type-of-service
-// 	TotalLen int         // packet total length
-// 	ID       int         // identification
-// 	Flags    HeaderFlags // flags
-// 	FragOff  int         // fragment offset
-// 	TTL      int         // time-to-live
-// 	Protocol int         // next protocol
-// 	Checksum int         // checksum
-// 	Src      net.IP      // source address
-// 	Dst      net.IP      // destination address
-// 	Options  []byte      // options, extension headers
-// }
+func printPacketInfo(packet gopacket.Packet) {
+	// Let's see if the packet is an ethernet packet
+	ethernetLayer := packet.Layer(layers.LayerTypeEthernet)
+	if ethernetLayer != nil {
+		fmt.Println("Ethernet layer detected.")
+		ethernetPacket, _ := ethernetLayer.(*layers.Ethernet)
+		fmt.Println("Source MAC: ", ethernetPacket.SrcMAC)
+		fmt.Println("Destination MAC: ", ethernetPacket.DstMAC)
+		// Ethernet type is typically IPv4 but could be ARP or other
+		fmt.Println("Ethernet type: ", ethernetPacket.EthernetType)
+		fmt.Println()
+	}
+
+	// Let's see if the packet is IP (even though the ether type told us)
+	ipLayer := packet.Layer(layers.LayerTypeIPv4)
+	if ipLayer != nil {
+		fmt.Println("IPv4 layer detected.")
+		ip, _ := ipLayer.(*layers.IPv4)
+
+		// IP layer variables:
+		// Version (Either 4 or 6)
+		// IHL (IP Header Length in 32-bit words)
+		// TOS, Length, Id, Flags, FragOffset, TTL, Protocol (TCP?),
+		// Checksum, SrcIP, DstIP
+		fmt.Printf("From %s to %s\n", ip.SrcIP, ip.DstIP)
+		fmt.Println("Protocol: ", ip.Protocol)
+		fmt.Println()
+	}
+
+	// Let's see if the packet is TCP
+	tcpLayer := packet.Layer(layers.LayerTypeTCP)
+	if tcpLayer != nil {
+		fmt.Println("TCP layer detected.")
+		tcp, _ := tcpLayer.(*layers.TCP)
+
+		// TCP layer variables:
+		// SrcPort, DstPort, Seq, Ack, DataOffset, Window, Checksum, Urgent
+		// Bool flags: FIN, SYN, RST, PSH, ACK, URG, ECE, CWR, NS
+		fmt.Printf("From port %d to %d\n", tcp.SrcPort, tcp.DstPort)
+		fmt.Println("Sequence number: ", tcp.Seq)
+		fmt.Println()
+	}
+
+	udpLayer := packet.Layer(layers.LayerTypeUDP)
+	if udpLayer != nil {
+		fmt.Println("UDP layer detected.")
+		udp, _ := udpLayer.(*layers.UDP)
+
+		// TCP layer variables:
+		// SrcPort, DstPort, Seq, Ack, DataOffset, Window, Checksum, Urgent
+		// Bool flags: FIN, SYN, RST, PSH, ACK, URG, ECE, CWR, NS
+		fmt.Printf("From port %d to %d\n", udp.SrcPort, udp.DstPort)
+		fmt.Println("Content number: ", udp.Contents)
+		fmt.Println()
+	}
+
+	// Iterate over all layers, printing out each layer type
+	fmt.Println("All packet layers:")
+	for _, layer := range packet.Layers() {
+		fmt.Println("- ", layer.LayerType())
+	}
+
+	// When iterating through packet.Layers() above,
+	// if it lists Payload layer then that is the same as
+	// this applicationLayer. applicationLayer contains the payload
+	applicationLayer := packet.ApplicationLayer()
+	if applicationLayer != nil {
+		fmt.Println("Application layer/Payload found.")
+		fmt.Printf("%s\n", applicationLayer.Payload())
+
+		// Search for a string inside the payload
+		if strings.Contains(string(applicationLayer.Payload()), "HTTP") {
+			fmt.Println("HTTP found!")
+		}
+	}
+
+	// Check for errors
+	if err := packet.ErrorLayer(); err != nil {
+		fmt.Println("Error decoding some part of the packet:", err)
+	}
+}
 
 var (
-	device       string = "lo0"
+	device       string = "en1"
 	snapshot_len int32  = 1024
 	promiscuous  bool   = false
 	err          error
-	timeout      time.Duration = 0
+	timeout      time.Duration = 1
 	handle       *pcap.Handle
 )
 
 func tcp(n int, done chan bool) {
-
-	//protocol := "tcp"
-
-	//var packetConn PacketConn
 
 	handle, err = pcap.OpenLive(device, snapshot_len, promiscuous, timeout)
 	if err != nil {
@@ -51,20 +115,8 @@ func tcp(n int, done chan bool) {
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
 	for packet := range packetSource.Packets() {
 		// Process packet here
-		fmt.Println(packet)
+		printPacketInfo(packet)
 	}
-
-	// fd, _ := syscall.Socket(syscall.AF_INET, syscall.SOCK_STREAM, syscall.IPPROTO_TCP)
-	// f := os.NewFile(uintptr(fd), fmt.Sprintf("fd %d", fd))
-
-	// for {
-	// 	buf := make([]byte, 1024)
-	// 	numRead, err := f.Read(buf)
-	// 	if err != nil {
-	// 		fmt.Println(err)
-	// 	}
-	// 	fmt.Printf("% X\n", buf[:numRead])
-	// }
 
 	done <- true
 

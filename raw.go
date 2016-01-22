@@ -40,15 +40,18 @@ func proto(n int, done chan bool) {
 	conn, _ := net.ListenIP("ip4:"+protocol, netaddr)
 
 	buf := make([]byte, 1024)
-	numRead, _, _ := conn.ReadFrom(buf)
-	fmt.Printf("% X\n", buf[:numRead])
+	for i := 0; i < n; i++ {
 
+		numRead, _, _ := conn.ReadFrom(buf)
+		fmt.Printf("% X\n", buf[:numRead])
+
+	}
 	done <- true
 
 }
 
 func main() {
 	done := make(chan bool)
-	go proto(2, done)
+	go proto(4, done)
 	<-done
 }

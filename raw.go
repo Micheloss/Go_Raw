@@ -1,8 +1,13 @@
 package main
 
 import (
+	"encoding/xml"
 	"fmt"
+	"io"
 	"log"
+	"net"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/google/gopacket"
@@ -11,17 +16,29 @@ import (
 )
 
 var (
-	device       string = "en1"
-	snapshot_len int32  = 1024
-	promiscuous  bool   = false
-	err          error
-	timeout      time.Duration = 1
-	handle       *pcap.Handle
-	total_packs  = 0
-	total_tcp    = 0
-	total_icmp   = 0
-	total_udp    = 0
+	device          string = "en1"
+	snapshot_len    int32  = 1024
+	promiscuous     bool   = true
+	err             error
+	timeout         time.Duration = 1
+	handle          *pcap.Handle
+	total_packs     = 0
+	total_tcp       = 0
+	total_tcp_SYN   = 0
+	total_tcp_ACK   = 0
+	total_tcp_data  = 0
+	total_icmp      = 0
+	total_udp       = 0
+	ip_dst_detected = ""
 )
+
+type Report struct {
+	XMLName    xml.Name `xml:"Net Report"`
+	ID         int      `xml:"id"`
+	TCPackets  int      `xml:"tcpPackets"`
+	UDPackets  int      `xml:udpPackets"`
+	ICMPackets int      `xml:"icmpPackets"`
+}
 
 func printPacketInfo(packet gopacket.Packet) {
 	// Let's see if the packet is an ethernet packet
@@ -37,10 +54,10 @@ func printPacketInfo(packet gopacket.Packet) {
 	// }
 
 	// // Let's see if the packet is IP (even though the ether type told us)
-	// ipLayer := packet.Layer(layers.LayerTypeIPv4)
+	ipLayer := packet.Layer(layers.LayerTypeIPv4)
 	// if ipLayer != nil {
 	// 	fmt.Println("IPv4 layer detected.")
-	// 	ip, _ := ipLayer.(*layers.IPv4)
+	ip, _ := ipLayer.(*layers.IPv4)
 
 	// 	// IP layer variables:
 	// 	// Version (Either 4 or 6)
@@ -51,14 +68,34 @@ func printPacketInfo(packet gopacket.Packet) {
 	// 	fmt.Println("Protocol: ", ip.Protocol)
 	// 	fmt.Println()
 	// }
+
+	if !strings.Contains(ip_dst_detected, string(ip.DstIP)) {
+		names, err4 := net.LookupAddr(string(ip.DstIP))
+		if err4 != nil {
+			names[0] = "error-resolving"
+		}
+		ip_dst_detected = ip_dst_detected + "|" + string(ip.DstIP) + " " + names[0]
+
+	}
 	total_packs++
 	// Let's see if the packet is TCP
 	tcpLayer := packet.Layer(layers.LayerTypeTCP)
 	if tcpLayer != nil {
 		total_tcp++
 		// fmt.Println("TCP layer detected.")
-		// tcp, _ := tcpLayer.(*layers.TCP)
+		tcp, _ := tcpLayer.(*layers.TCP)
+		if tcp.SYN {
+			total_tcp_SYN++
+		} else {
 
+			if tcp.ACK {
+				total_tcp_ACK++
+			} else {
+
+				total_tcp_data++
+
+			}
+		}
 		// // TCP layer variables:
 		// // SrcPort, DstPort, Seq, Ack, DataOffset, Window, Checksum, Urgent
 		// // Bool flags: FIN, SYN, RST, PSH, ACK, URG, ECE, CWR, NS
@@ -126,6 +163,19 @@ func printPacketInfo(packet gopacket.Packet) {
 func main() {
 	//done_icmp := make(chan bool)
 
+	v := &Report{ID: 100, TCPackets: total_tcp, UDPackets: total_udp, ICMPackets: total_icmp}
+
+	filename := "Net-Report"
+	file, _ := os.Create(filename)
+
+	xmlWriter := io.Writer(file)
+
+	enc := xml.NewEncoder(xmlWriter)
+	enc.Indent("  ", " ")
+	if err5 := enc.Encode(v); err5 != nil {
+		fmt.Println(err5)
+	}
+
 	handle, err = pcap.OpenLive(device, snapshot_len, promiscuous, timeout)
 	if err != nil {
 		log.Fatal(err)
@@ -136,9 +186,9 @@ func main() {
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
 	for packet := range packetSource.Packets() {
 		// Process packet here
-		printPacketInfo(packet)
+		go printPacketInfo(packet)
 
-		if total_packs > 60000 {
+		if total_packs > 600 {
 			break
 		}
 	}
@@ -150,6 +200,10 @@ func main() {
 	fmt.Println("Total TCP packets captured: ", total_tcp, ". ", p_tcp, " %"+" of total")
 	fmt.Println("Total UDP packets captured:  ", total_udp, ". ", p_udp, " %"+"of total")
 	fmt.Println("Total ICMP packets captured:  ", total_icmp, ". ", p_icmp, " %"+"of total")
+	fmt.Println(" -----------------------------------  ")
+	fmt.Println("           IPs contacted      ")
+	fmt.Println(" -----------------------------------  ")
+	fmt.Println(ip_dst_detected)
 
 	//<-done_icmp
 	//<-done_tcp

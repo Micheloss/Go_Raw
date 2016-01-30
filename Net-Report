@@ -1,0 +1,6 @@
+  <Report xmlns="Net">
+   <id>100</id>
+   <tcpPackets>0</tcpPackets>
+   <UDPackets>0</UDPackets>
+   <icmpPackets>0</icmpPackets>
+  </Report>
